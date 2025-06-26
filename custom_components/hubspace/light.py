@@ -25,6 +25,7 @@ from .bridge import HubspaceBridge
 from .const import DOMAIN
 from .entity import HubspaceBaseEntity, update_decorator
 from .dual_mode_light import HubspaceColorLight, HubspaceWhiteLight, should_create_dual_lights
+from .string_light import HubspaceStringLightBulb, should_create_string_light_bulbs, get_string_light_bulb_count
 
 LOGGER = logging.getLogger(__name__)
 
@@ -218,6 +219,15 @@ async def async_setup_entry(
                     HubspaceColorLight(bridge, controller, resource),
                     HubspaceWhiteLight(bridge, controller, resource)
                 ]
+            
+            if should_create_string_light_bulbs(resource):
+                LOGGER.info(f"Creating string light bulbs for device {resource.id}")
+                bulb_count = get_string_light_bulb_count(resource)
+                return [
+                    HubspaceStringLightBulb(bridge, controller, resource, i, bulb_count)
+                    for i in range(bulb_count)
+                ]
+
         except Exception as e:
             # If enhanced functionality fails, fall back to original behavior
             LOGGER.warning(f"Enhanced light functionality failed for device {resource.id}, using standard light: {e}")
