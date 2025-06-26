@@ -1,6 +1,7 @@
 """Home Assistant entity for interacting with Afero Light."""
 
 from functools import partial
+import logging
 
 from aioafero import EventType
 from aioafero.v1 import AferoBridgeV1, LightController
@@ -23,6 +24,9 @@ from homeassistant.util.color import brightness_to_value, value_to_brightness
 from .bridge import HubspaceBridge
 from .const import DOMAIN
 from .entity import HubspaceBaseEntity, update_decorator
+from .dual_mode_light import HubspaceColorLight, HubspaceWhiteLight, should_create_dual_lights
+
+LOGGER = logging.getLogger(__name__)
 
 
 class HubspaceLight(HubspaceBaseEntity, LightEntity):
@@ -204,13 +208,35 @@ async def async_setup_entry(
     controller: LightController = api.lights
     make_entity = partial(HubspaceLight, bridge, controller)
 
+    def make_entities(resource: Light) -> list[HubspaceLight]:
+        """Create light entity(ies) based on device capabilities."""
+        try:
+            # Try enhanced functionality first
+            if should_create_dual_lights(resource):
+                LOGGER.info(f"Creating dual-mode lights for device {resource.id}")
+                return [
+                    HubspaceColorLight(bridge, controller, resource),
+                    HubspaceWhiteLight(bridge, controller, resource)
+                ]
+        except Exception as e:
+            # If enhanced functionality fails, fall back to original behavior
+            LOGGER.warning(f"Enhanced light functionality failed for device {resource.id}, using standard light: {e}")
+        
+        # Default: use original single light entity (preserves original behavior)
+        return [make_entity(resource)]
+
     @callback
     def async_add_entity(event_type: EventType, resource: Light) -> None:
-        """Add an entity."""
-        async_add_entities([make_entity(resource)])
+        """Add an entity or entities."""
+        entities = make_entities(resource)
+        async_add_entities(entities)
 
-    # add all current items in controller
-    async_add_entities(make_entity(entity) for entity in controller)
+    # add all current items in controller using new logic
+    all_entities = []
+    for entity in controller:
+        all_entities.extend(make_entities(entity))
+    async_add_entities(all_entities)
+    
     # register listener for new entities
     config_entry.async_on_unload(
         controller.subscribe(async_add_entity, event_filter=EventType.RESOURCE_ADDED)
