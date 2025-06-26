@@ -69,8 +69,7 @@ class HubspaceBridge:
             async with asyncio.timeout(self.config_entry.options[CONF_TIMEOUT]):
                 await self.api.initialize()
                 thedata = await self.api.fetch_data()
-                LOGGER.warning("!!!! THE DATA")
-                LOGGER.warning(thedata)
+                LOGGER.debug("Successfully fetched device data from Hubspace API")
             setup_ok = True
         except (InvalidAuth, InvalidResponse):
             # Credentials have changed. Force a re-login
