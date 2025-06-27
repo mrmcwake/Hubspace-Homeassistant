@@ -613,22 +613,43 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
     async def _update_bulb_state_from_resource(self) -> None:
         """Update cached bulb state from the shared framebuffer context."""
         try:
-            # Use shared context to get current framebuffer - this bypasses state from aioafero
+            # Check if device power state and refresh framebuffer if needed
+            power_state = self._shared_context.get_power_state()
+            LOGGER.debug(f"Bulb {self._bulb_index} updating state, device power state: {power_state}")
+            
+            if power_state == "on":
+                # Try to refresh framebuffer from device to get current colors
+                refresh_success = await self._shared_context.refresh_framebuffer_from_device()
+                LOGGER.debug(f"Bulb {self._bulb_index} framebuffer refresh result: {refresh_success}")
+            
+            # Use shared context to get current framebuffer - this includes refreshed data
             current_framebuffer = self._shared_context.get_current_framebuffer()
             
             if current_framebuffer and self._bulb_index < len(current_framebuffer):
                 bulb_data = current_framebuffer[self._bulb_index]
                 if isinstance(bulb_data, dict):
+                    # Store previous state for comparison
+                    old_state = dict(self._current_bulb_state)
                     self._current_bulb_state.update(bulb_data)
+                    
                     # Determine if bulb is "on" based on brightness values
                     color_brightness = bulb_data.get('colorBrightness', 0)
                     white_brightness = bulb_data.get('whiteBrightness', 0)
                     self._is_on = (color_brightness > 0 or white_brightness > 0)
-                    LOGGER.debug(f"Updated bulb {self._bulb_index} state from shared context: on={self._is_on}, color_brightness={color_brightness}, white_brightness={white_brightness}")
+                    
+                    # Log state change if significant
+                    if (old_state.get('r') != bulb_data.get('r') or 
+                        old_state.get('g') != bulb_data.get('g') or 
+                        old_state.get('b') != bulb_data.get('b') or
+                        old_state.get('colorBrightness') != color_brightness or
+                        old_state.get('whiteBrightness') != white_brightness):
+                        LOGGER.info(f"Bulb {self._bulb_index} state changed: on={self._is_on}, "
+                                f"RGB=({bulb_data.get('r', 0)}, {bulb_data.get('g', 0)}, {bulb_data.get('b', 0)}), "
+                                f"colorBrightness={color_brightness}, whiteBrightness={white_brightness}")
+                    
                     return
             
             # Fallback to check overall device power state
-            power_state = self._shared_context.get_power_state()
             if power_state == "on":
                 # Device is on but we don't have framebuffer data yet
                 self._is_on = True
@@ -638,7 +659,7 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
                 LOGGER.debug(f"Bulb {self._bulb_index} assuming off state")
                 
         except Exception as e:
-            LOGGER.debug(f"Error updating bulb state: {e}")
+            LOGGER.error(f"Error updating bulb {self._bulb_index} state: {e}")
             # Default to off if we can't determine state
             self._is_on = False
     
@@ -802,6 +823,21 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
             LOGGER.info(f"Successfully turned off bulb {self._bulb_index}")
         else:
             LOGGER.error(f"Failed to turn off bulb {self._bulb_index}")
+    
+    @callback
+    def on_update(self) -> None:
+        """Called when the parent device is updated - refresh our state."""
+        # Trigger an async state update when the device changes
+        # This ensures we get the latest framebuffer when device state changes
+        self.hass.async_create_task(self._handle_device_update())
+
+    async def _handle_device_update(self) -> None:
+        """Handle device update event asynchronously."""
+        try:
+            await self._update_bulb_state_from_resource()
+            self.async_write_ha_state()
+        except Exception as e:
+            LOGGER.debug(f"Error handling device update for bulb {self._bulb_index}: {e}")
 
 
 async def async_setup_entry(

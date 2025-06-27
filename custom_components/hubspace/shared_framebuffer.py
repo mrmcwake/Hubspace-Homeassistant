@@ -34,20 +34,9 @@ class SharedFramebufferContext:
         self._framebuffer_initialized = False
         LOGGER.info(f"SharedFramebufferContext initialized for device {resource.id} with {expected_bulb_count} bulbs")
 
-    def get_current_framebuffer(self) -> Optional[list[dict]]:
-        """
-        Get the current framebuffer state for individual bulb control.
-        If we have our own cached version, use that. Otherwise try to read from resource.
-        """
+    def _read_framebuffer_from_resource(self) -> Optional[list[dict]]:
+        """Read framebuffer directly from the resource's current state."""
         try:
-            # If we have our own cached framebuffer, use it (this is the authoritative state)
-            if self._cached_framebuffer is not None:
-                LOGGER.debug(f"SharedFramebufferContext: Using cached framebuffer with {len(self._cached_framebuffer)} bulbs")
-                return self._cached_framebuffer
-            
-            # Try to initialize from resource data if available
-            LOGGER.debug(f"SharedFramebufferContext: Attempting to initialize framebuffer from device {self.resource.id}")
-            
             # Check color mode first
             color_mode = getattr(self.resource.color_mode, 'mode', None)
             LOGGER.debug(f"Current color mode: {color_mode}")
@@ -62,7 +51,6 @@ class SharedFramebufferContext:
                 return None
             
             # Look for any color-sequence-v2 instances regardless of color mode
-            # This handles cases where the mode hasn't been set to "individual" yet
             sequence_instances = []
             for k, v in self.resource.instances.items():
                 if isinstance(k, tuple) and k[0] == 'color-sequence-v2':
@@ -74,8 +62,6 @@ class SharedFramebufferContext:
             for k, seq_data in sequence_instances:
                 LOGGER.debug(f"Checking sequence instance {k}")
                 if isinstance(seq_data, dict):
-                    # The structure might be nested differently than expected
-                    # Try multiple extraction paths
                     framebuffer = None
                     
                     # Path 1: seq_data['color-sequence-v2']['frameBuffer']['framebuffer']
@@ -97,11 +83,8 @@ class SharedFramebufferContext:
                         framebuffer = seq_data['framebuffer']
                     
                     if framebuffer and isinstance(framebuffer, list):
-                        LOGGER.debug(f"Found framebuffer with {len(framebuffer)} bulbs, caching it")
-                        # Cache this framebuffer as our authoritative state
-                        self._cached_framebuffer = [dict(b) for b in framebuffer]  # Deep copy
-                        self._framebuffer_initialized = True
-                        return self._cached_framebuffer
+                        LOGGER.debug(f"Found framebuffer with {len(framebuffer)} bulbs")
+                        return [dict(b) for b in framebuffer]  # Deep copy
                     else:
                         LOGGER.debug(f"No valid framebuffer found in sequence {k}")
             
@@ -109,7 +92,61 @@ class SharedFramebufferContext:
             return None
             
         except Exception as e:
-            LOGGER.error(f"Error extracting framebuffer: {e}")
+            LOGGER.error(f"Error reading framebuffer from resource: {e}")
+            return None
+
+    async def refresh_framebuffer_from_device(self) -> bool:
+        """
+        Actively refresh the framebuffer state from the device.
+        This forces a re-read of the current device state.
+        """
+        try:
+            LOGGER.info(f"Refreshing framebuffer from device {self.resource.id}")
+            
+            # Clear our cached framebuffer to force a fresh read
+            old_framebuffer = self._cached_framebuffer
+            self._cached_framebuffer = None
+            
+            # Try to read fresh state from resource
+            fresh_framebuffer = self._read_framebuffer_from_resource()
+            
+            if fresh_framebuffer:
+                self._cached_framebuffer = fresh_framebuffer
+                self._framebuffer_initialized = True
+                LOGGER.info(f"Successfully refreshed framebuffer with {len(fresh_framebuffer)} bulbs:")
+                for i, bulb in enumerate(fresh_framebuffer):
+                    color_brightness = bulb.get('colorBrightness', 0)
+                    white_brightness = bulb.get('whiteBrightness', 0)
+                    r, g, b = bulb.get('r', 0), bulb.get('g', 0), bulb.get('b', 0)
+                    LOGGER.info(f"  Bulb {i}: RGB=({r},{g},{b}), ColorBrightness={color_brightness}, WhiteBrightness={white_brightness}")
+                return True
+            else:
+                # If we can't read fresh state, restore the old cached version
+                self._cached_framebuffer = old_framebuffer
+                LOGGER.warning(f"Could not refresh framebuffer from device, keeping cached version")
+                return False
+                
+        except Exception as e:
+            LOGGER.error(f"Error refreshing framebuffer: {e}")
+            return False
+
+    def get_current_framebuffer(self) -> Optional[list[dict]]:
+        """
+        Get the current framebuffer state for individual bulb control.
+        If we have our own cached version, use that. Otherwise try to read from resource.
+        """
+        try:
+            # If we have our own cached framebuffer, use it (this is the authoritative state)
+            if self._cached_framebuffer is not None:
+                LOGGER.debug(f"SharedFramebufferContext: Using cached framebuffer with {len(self._cached_framebuffer)} bulbs")
+                return self._cached_framebuffer
+            
+            # Try to initialize from resource data if available
+            LOGGER.debug(f"SharedFramebufferContext: Attempting to initialize framebuffer from device {self.resource.id}")
+            return self._read_framebuffer_from_resource()
+            
+        except Exception as e:
+            LOGGER.error(f"Error getting current framebuffer: {e}")
             return None
 
     def get_power_state(self) -> Optional[str]:
