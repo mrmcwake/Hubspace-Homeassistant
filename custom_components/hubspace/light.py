@@ -675,7 +675,7 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
         async def periodic_update():
             """Periodically update state from device."""
             try:
-                await self.update_from_device_state()
+                await self._update_bulb_state_from_resource()
                 self.async_write_ha_state()
             except Exception as e:
                 LOGGER.debug(f"Error in periodic update for bulb {self._bulb_index}: {e}")
