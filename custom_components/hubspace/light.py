@@ -615,12 +615,12 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
         try:
             # Check if device power state and refresh framebuffer if needed
             power_state = self._shared_context.get_power_state()
-            LOGGER.debug(f"Bulb {self._bulb_index} updating state, device power state: {power_state}")
+            LOGGER.info(f"Bulb {self._bulb_index} updating state, device power state: {power_state}")
             
             if power_state == "on":
                 # Try to refresh framebuffer from device to get current colors
                 refresh_success = await self._shared_context.refresh_framebuffer_from_device()
-                LOGGER.debug(f"Bulb {self._bulb_index} framebuffer refresh result: {refresh_success}")
+                LOGGER.info(f"Bulb {self._bulb_index} framebuffer refresh result: {refresh_success}")
             
             # Use shared context to get current framebuffer - this includes refreshed data
             current_framebuffer = self._shared_context.get_current_framebuffer()
@@ -651,12 +651,18 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
             
             # Fallback to check overall device power state
             if power_state == "on":
-                # Device is on but we don't have framebuffer data yet
+                # Device is on but we don't have framebuffer data yet - set default color
                 self._is_on = True
-                LOGGER.debug(f"Bulb {self._bulb_index} assuming on state from device power")
+                # Provide default color data so bulbs aren't just "on" with no color
+                self._current_bulb_state.update({
+                    'r': 255, 'g': 255, 'b': 255,
+                    'colorBrightness': 50,
+                    'whiteBrightness': 0
+                })
+                LOGGER.warning(f"Bulb {self._bulb_index} no framebuffer data - using default white color")
             else:
                 self._is_on = False
-                LOGGER.debug(f"Bulb {self._bulb_index} assuming off state")
+                LOGGER.info(f"Bulb {self._bulb_index} device is off")
                 
         except Exception as e:
             LOGGER.error(f"Error updating bulb {self._bulb_index} state: {e}")
@@ -666,9 +672,12 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
     async def async_added_to_hass(self) -> None:
         """Subscribe to updates when entity is added to hass."""
         await super().async_added_to_hass()
+        LOGGER.info(f"Bulb {self._bulb_index} being added to Home Assistant")
         
         # Initialize bulb state from device
         await self._update_bulb_state_from_resource()
+        
+        # Force immediate state write to Home Assistant        self.async_write_ha_state()
         
         # Set up a periodic state refresh to keep in sync with the device
         # This helps ensure HomeAssistant reflects actual device state
@@ -683,7 +692,7 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
         # Schedule periodic updates every 30 seconds
         async def schedule_updates():
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(60)
                 await periodic_update()
         
         self.hass.async_create_task(schedule_updates())
