@@ -619,11 +619,18 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
             
             if power_state == "on":
                 # Try to refresh framebuffer from device to get current colors
+            if power_state == "on":
+                # Try to refresh framebuffer from device to get current colors
                 refresh_success = await self._shared_context.refresh_framebuffer_from_device()
                 LOGGER.info(f"Bulb {self._bulb_index} framebuffer refresh result: {refresh_success}")
+                
+                # Even if refresh failed, check if we have cached framebuffer data
+                if not refresh_success:
+                    LOGGER.warning(f"Bulb {self._bulb_index} refresh failed, checking for cached framebuffer data")
             
             # Use shared context to get current framebuffer - this includes refreshed data
             current_framebuffer = self._shared_context.get_current_framebuffer()
+            if current_framebuffer and len(current_framebuffer) > self._bulb_index:                LOGGER.info(f"Bulb {self._bulb_index} framebuffer data: {current_framebuffer[self._bulb_index]}")
             
             if current_framebuffer and self._bulb_index < len(current_framebuffer):
                 bulb_data = current_framebuffer[self._bulb_index]
