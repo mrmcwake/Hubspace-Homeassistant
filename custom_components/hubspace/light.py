@@ -697,13 +697,24 @@ class HubspaceStringLightBulb(HubspaceBaseEntity, LightEntity):
                 LOGGER.debug(f"Error in periodic update for bulb {self._bulb_index}: {e}")
         
         # Schedule periodic updates every 30 seconds
-        async def schedule_updates():
-            while True:
-                await asyncio.sleep(60)
-                await periodic_update()
+        # Use Home Assistant's built-in track_time_interval instead of infinite loop
+        from homeassistant.helpers.event import async_track_time_interval
+        from datetime import timedelta
         
-        self.hass.async_create_task(schedule_updates())
-    
+        async def periodic_update_callback(now):
+            """Periodic update callback for Home Assistant scheduler."""
+            try:
+                await self._update_bulb_state_from_resource()
+                self.async_write_ha_state()
+            except Exception as e:
+                LOGGER.debug(f"Error in periodic update for bulb {self._bulb_index}: {e}")
+        
+        # Schedule periodic updates every 60 seconds using HA's scheduler
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass, periodic_update_callback, timedelta(seconds=60)
+            )
+        )
     @property
     def is_on(self) -> bool:
         """Return if the individual bulb is on."""

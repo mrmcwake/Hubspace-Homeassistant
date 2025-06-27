@@ -96,7 +96,6 @@ class SharedFramebufferContext:
             return None
 
     async def refresh_framebuffer_from_device(self) -> bool:
-        LOGGER.info(f"Attempting to refresh framebuffer for device {self._resource.id}")
         """
         Actively refresh the framebuffer state from the device.
         This forces a re-read of the current device state.
